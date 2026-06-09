@@ -74,6 +74,7 @@
             <button id="zoomIn" class="btn icon" title="Збільшити">+</button>
           </div>
           <button id="png" class="btn map-only">🖼 PNG</button>
+          <button id="settingsBtn" class="btn">⚙ Ключі</button>
           <button id="printBtn" class="btn primary">🖨 Друк / PDF</button>
         </div>
       </nav>
@@ -123,6 +124,25 @@
       </div>
     </section>
   </main>
+
+  <!-- Налаштування: API-ключі -->
+  <div id="settings" class="modal hidden">
+    <div class="modal-box">
+      <h3>API-ключі</h3>
+      <p class="muted">Зберігаються лише у цьому браузері (localStorage). Нікуди не надсилаються, окрім самих сервісів Gemini та Anthropic.</p>
+      <label>Gemini API key (транскрипція)
+        <input id="kGemini" class="inp" type="password" placeholder="AIza… або AQ…" autocomplete="off" />
+      </label>
+      <label>Anthropic API key (аналіз)
+        <input id="kAnthropic" class="inp" type="password" placeholder="sk-ant-…" autocomplete="off" />
+      </label>
+      <p class="hint">Де взяти: Gemini → aistudio.google.com/apikey · Anthropic → console.anthropic.com</p>
+      <div class="row spread" style="margin-top:14px">
+        <button id="closeSettings" class="btn ghost">Закрити</button>
+        <button id="saveKeys" class="btn primary">Зберегти</button>
+      </div>
+    </div>
+  </div>
 
   <script type="module" src="app.js"></script>
 </body>

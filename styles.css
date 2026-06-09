@@ -12,7 +12,7 @@ button,input,textarea,select{font:inherit}
 .topbar{display:flex;align-items:center;justify-content:space-between;padding:10px 18px;background:linear-gradient(120deg,#2e5e8c,#3a7bb0);color:#fff;box-shadow:var(--shadow)}
 .brand{font-weight:700;font-size:16px}
 .brand span{font-weight:400;opacity:.85}
-.status{font-size:12px;background:rgba(255,255,255,.18);padding:4px 10px;border-radius:20px}
+.status{font-size:12px;background:rgba(255,255,255,.18);padding:4px 10px;border-radius:20px;cursor:pointer}
 .status.warn{background:#e9b949;color:#3a2c00}
 .status.ok{background:#2ea36a}
 
@@ -99,5 +99,11 @@ label .inp,label .ta{margin-top:3px}
 .ref-item b{color:var(--ink)}
 .ref-item .tag{display:inline-block;font-size:10.5px;padding:1px 7px;border-radius:10px;color:#fff;margin-left:6px;vertical-align:middle}
 .ref-item small{color:var(--muted)}
+
+.modal{position:fixed;inset:0;background:rgba(20,30,50,.45);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}
+.modal.hidden{display:none}
+.modal-box{background:#fff;border-radius:14px;padding:22px 24px;width:440px;max-width:94vw;box-shadow:0 20px 60px rgba(20,40,70,.3)}
+.modal-box h3{margin:0 0 8px;font-size:16px}
+.modal-box label{margin:14px 0 0}
 
 @media (max-width:1100px){ .layout{grid-template-columns:1fr} .sidebar{position:static} .editors{grid-template-columns:1fr} }

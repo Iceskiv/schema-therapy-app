@@ -1,16 +1,23 @@
 import { renderMap, zoomBy, zoomFit } from "./render.js";
 import { downloadMapPNG, printSheets } from "./export.js";
+import { clientCatalog, SAMPLE_ANALYSIS, buildSystemPrompt, OUTPUT_TOOL } from "./knowledge/schema-knowledge.js";
+import Anthropic from "https://esm.sh/@anthropic-ai/sdk";
+import { GoogleGenAI, createUserContent, createPartFromUri } from "https://esm.sh/@google/genai";
 
 const $ = (s) => document.querySelector(s);
 const svg = $("#map");
+const GEMINI_MODEL = "gemini-2.5-flash";
+const CLAUDE_MODEL = "claude-opus-4-8";
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-let catalog = null;
-let currentAudio = null; // File | Blob
+const catalog = clientCatalog(); // синхронно, з вбудованого модуля знань
+let currentAudio = null;
 let mediaRec = null;
 let recChunks = [];
 let selectedId = null;
 
 const state = {
+  catalog,
   patientSummary: "",
   problems: [],
   goals: [],
@@ -27,36 +34,83 @@ const state = {
 const linesToArr = (s) => String(s || "").split("\n").map((x) => x.trim()).filter(Boolean);
 const arrToLines = (a) => (a || []).join("\n");
 function setProgress(msg, kind = "") { const p = $("#progress"); p.textContent = msg || ""; p.className = "progress " + kind; }
-function uniqueId(base) {
-  let id = base, i = 2;
-  while (state.modes.some((m) => m.id === id)) id = base + "__" + i++;
-  return id;
-}
+function uniqueId(base) { let id = base, i = 2; while (state.modes.some((m) => m.id === id)) id = base + "__" + i++; return id; }
 function defById(id) { return (catalog.modes || []).find((m) => m.id === id) || {}; }
+function mimeFromName(name) {
+  const ext = (name || "").toLowerCase().split(".").pop();
+  return ({ mp3: "audio/mp3", wav: "audio/wav", ogg: "audio/ogg", oga: "audio/ogg", opus: "audio/ogg", flac: "audio/flac", aac: "audio/aac", m4a: "audio/mp4", mp4: "audio/mp4", webm: "audio/webm", aiff: "audio/aiff" }[ext]) || "audio/mpeg";
+}
+
+// ---------- ключі (localStorage) ----------
+function getKeys() { return { gemini: (localStorage.getItem("gk") || "").trim(), anthropic: (localStorage.getItem("ak") || "").trim() }; }
+function updateKeyStatus() {
+  const { gemini, anthropic } = getKeys();
+  const st = $("#status");
+  if (gemini && anthropic) { st.textContent = "Ключі збережено ✓"; st.className = "status ok"; }
+  else { st.textContent = "⚙ Введи API-ключі"; st.className = "status warn"; }
+}
+function openSettings() {
+  const { gemini, anthropic } = getKeys();
+  $("#kGemini").value = gemini; $("#kAnthropic").value = anthropic;
+  $("#settings").classList.remove("hidden");
+}
+
+// ---------- клієнтські AI-виклики ----------
+async function transcribeAudio(file) {
+  const { gemini } = getKeys();
+  if (!gemini) { openSettings(); throw new Error("Спершу встав ключ Gemini у Налаштуваннях (⚙)"); }
+  const ai = new GoogleGenAI({ apiKey: gemini });
+  const mime = file.type || mimeFromName(file.name);
+  const uploaded = await ai.files.upload({ file, config: { mimeType: mime } });
+  let f = uploaded;
+  for (let i = 0; i < 120 && f.state !== "ACTIVE"; i++) {
+    if (f.state === "FAILED") throw new Error("Gemini не зміг обробити аудіо — спробуй mp3/wav або встав транскрипт вручну.");
+    await sleep(1500);
+    f = await ai.files.get({ name: uploaded.name });
+  }
+  if (f.state !== "ACTIVE") throw new Error("Аудіо обробляється задовго — спробуй ще раз.");
+  const prompt =
+    "Це аудіозапис клінічного випадку (очікувана мова — українська). " +
+    "Зроби максимально точну ДОСЛІВНУ транскрипцію тією мовою, якою говорять. НЕ перекладай. " +
+    "Поверни лише текст транскрипції, без коментарів.";
+  const r = await ai.models.generateContent({ model: GEMINI_MODEL, contents: createUserContent([createPartFromUri(f.uri, f.mimeType), prompt]) });
+  try { await ai.files.delete({ name: uploaded.name }); } catch {}
+  return (r.text || "").trim();
+}
+
+async function analyzeTranscript(transcript) {
+  const { anthropic } = getKeys();
+  if (!anthropic) { openSettings(); throw new Error("Спершу встав ключ Anthropic у Налаштуваннях (⚙)"); }
+  const client = new Anthropic({ apiKey: anthropic, dangerouslyAllowBrowser: true });
+  const msg = await client.messages.create({
+    model: CLAUDE_MODEL,
+    max_tokens: 16000,
+    system: [{ type: "text", text: buildSystemPrompt(), cache_control: { type: "ephemeral" } }],
+    tools: [OUTPUT_TOOL],
+    tool_choice: { type: "tool", name: OUTPUT_TOOL.name },
+    messages: [{ role: "user", content: "Ось транскрипт усно представленого випадку. Побудуй концептуалізацію та план по 3 етапах через інструмент submit_conceptualization.\n\n<transcript>\n" + transcript + "\n</transcript>" }],
+  });
+  const tu = msg.content.find((b) => b.type === "tool_use");
+  if (!tu) throw new Error("Модель не повернула структуровану відповідь.");
+  return tu.input;
+}
 
 // ---------- ініціалізація ----------
-async function init() {
-  try {
-    const [cat, health] = await Promise.all([
-      fetch("/api/catalog").then((r) => r.json()),
-      fetch("/api/health").then((r) => r.json()).catch(() => ({})),
-    ]);
-    catalog = cat;
-    state.catalog = cat; // render.js читає state.catalog
-    const st = $("#status");
-    if (health.hasGemini && health.hasClaude) {
-      st.textContent = `Ключі підключені · ${health.claudeModel}`;
-      st.className = "status ok";
-    } else {
-      st.textContent = "Демо-режим · додай ключі в .env";
-      st.className = "status warn";
-    }
-    buildPalette();
-    buildReference();
-    renderAll();
-  } catch (e) {
-    setProgress("Помилка завантаження каталогу: " + e.message, "err");
+function init() {
+  // префіл ключів з посилання виду  #gk=...&ak=...
+  if (location.hash && location.hash.length > 1) {
+    const p = new URLSearchParams(location.hash.slice(1));
+    let changed = false;
+    if (p.get("gk")) { localStorage.setItem("gk", p.get("gk")); changed = true; }
+    if (p.get("ak")) { localStorage.setItem("ak", p.get("ak")); changed = true; }
+    if (changed) history.replaceState(null, "", location.pathname + location.search);
   }
+  buildPalette();
+  buildReference();
+  renderAll();
+  updateKeyStatus();
+  const { gemini, anthropic } = getKeys();
+  if (!gemini || !anthropic) setProgress("Натисни ⚙ і встав 2 ключі (або скористайся «Демо-приклад» без ключів).", "");
 }
 
 // ---------- маппінг аналізу у стан ----------
@@ -65,10 +119,10 @@ function applyAnalysis(a) {
   state.problems = a.problems || [];
   state.goals = a.goals || [];
   state.modes = [];
-  let hasHealthy = false, hasHappy = false;
+  let hasHealthy = false;
   for (const m of a.modes || []) {
     const def = defById(m.id);
-    const node = {
+    state.modes.push({
       id: uniqueId(m.id || "mode"),
       baseId: def.id || m.id,
       ua: m.ua_name || def.ua || m.id,
@@ -76,22 +130,15 @@ function applyAnalysis(a) {
       scene: def.scene || "external",
       descriptors: m.descriptors || [],
       linked: m.linked_schemas || [],
-    };
+    });
     if (def.id === "healthy_adult") hasHealthy = true;
-    if (def.id === "happy_child") hasHappy = true;
-    state.modes.push(node);
   }
   if (!hasHealthy) addModeById("healthy_adult", false);
-  // happy_child — лише якщо модель додала (це орієнтир)
   const plan = a.plan || {};
   for (const k of ["stage1", "stage2", "stage3"]) {
-    state.plan[k] = {
-      description: plan[k]?.description || "",
-      modes: plan[k]?.modes || [],
-      techniques: plan[k]?.techniques || [],
-    };
+    state.plan[k] = { description: plan[k]?.description || "", modes: plan[k]?.modes || [], techniques: plan[k]?.techniques || [] };
   }
-  state.planDoc = ""; // перебудувати документ плану з нового аналізу
+  state.planDoc = "";
   selectedId = null;
   renderAll();
   switchTab("map");
@@ -100,12 +147,11 @@ function applyAnalysis(a) {
 function addModeById(id, rerender = true) {
   const def = defById(id);
   if (!def.id) return;
-  const node = { id: uniqueId(def.id), baseId: def.id, ua: def.ua, category: def.category, scene: def.scene, descriptors: [], linked: def.schemas || [] };
-  state.modes.push(node);
-  if (rerender) { renderAll(); }
+  state.modes.push({ id: uniqueId(def.id), baseId: def.id, ua: def.ua, category: def.category, scene: def.scene, descriptors: [], linked: def.schemas || [] });
+  if (rerender) renderAll();
 }
 
-// ---------- рендер усього ----------
+// ---------- рендер ----------
 function renderAll() {
   renderMap(svg, state, { onSelect: selectNode });
   $("#problems").value = arrToLines(state.problems);
@@ -114,11 +160,7 @@ function renderAll() {
   renderPlan();
   refreshPaletteState();
 }
-
-function selectNode(id) {
-  selectedId = id;
-  renderSelected();
-}
+function selectNode(id) { selectedId = id; renderSelected(); }
 function renderSelected() {
   const m = state.modes.find((x) => x.id === selectedId);
   if (!m) { $("#selForm").classList.add("hidden"); $("#selEmpty").classList.remove("hidden"); $("#selTitle").textContent = "Вибрана частка"; return; }
@@ -143,12 +185,9 @@ function buildPalette() {
     g.innerHTML = `<h5>${label}</h5>`;
     for (const m of items) {
       const chip = document.createElement("span");
-      chip.className = "chip";
-      chip.dataset.id = m.id;
-      chip.style.borderColor = catalog.categoryColors[m.category];
-      chip.textContent = m.ua;
-      chip.title = m.def || "";
-      chip.addEventListener("click", () => { addModeById(m.id); });
+      chip.className = "chip"; chip.dataset.id = m.id; chip.style.borderColor = catalog.categoryColors[m.category];
+      chip.textContent = m.ua; chip.title = m.def || "";
+      chip.addEventListener("click", () => addModeById(m.id));
       g.appendChild(chip);
     }
     box.appendChild(g);
@@ -156,13 +195,10 @@ function buildPalette() {
 }
 function refreshPaletteState() {
   const present = new Set(state.modes.map((m) => defById(m.id).id || m.id));
-  // позначаємо унікальні (один екземпляр) — лишаємо клікабельними завжди, але підсвічуємо наявні
-  document.querySelectorAll("#palette .chip").forEach((c) => {
-    c.dataset.on = present.has(c.dataset.id) ? "1" : "";
-  });
+  document.querySelectorAll("#palette .chip").forEach((c) => { c.dataset.on = present.has(c.dataset.id) ? "1" : ""; });
 }
 
-// ---------- план (один редагований документ, розбитий на абзаци) ----------
+// ---------- план ----------
 const esc = (s) => String(s || "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 function buildPlanDocHTML() {
   let h = "";
@@ -180,10 +216,7 @@ function renderPlan() {
   const host = $("#planEditor");
   host.innerHTML = "";
   const doc = document.createElement("div");
-  doc.className = "plan-doc";
-  doc.id = "planDoc";
-  doc.contentEditable = "true";
-  doc.spellcheck = false;
+  doc.className = "plan-doc"; doc.id = "planDoc"; doc.contentEditable = "true"; doc.spellcheck = false;
   doc.innerHTML = state.planDoc || buildPlanDocHTML();
   doc.addEventListener("input", () => { state.planDoc = doc.innerHTML; });
   host.appendChild(doc);
@@ -198,38 +231,28 @@ function planHTML() {
 function buildReference() {
   const body = $("#refBody");
   body.innerHTML = "";
-  // частки
   const grpModes = document.createElement("div");
-  grpModes.className = "ref-grp";
-  grpModes.innerHTML = "<h3>Частки (modes)</h3>";
+  grpModes.className = "ref-grp"; grpModes.innerHTML = "<h3>Частки (modes)</h3>";
   catalog.modes.forEach((m) => {
-    const it = document.createElement("div");
-    it.className = "ref-item";
+    const it = document.createElement("div"); it.className = "ref-item";
     it.dataset.text = (m.ua + " " + (m.def || "") + " " + (m.task || "")).toLowerCase();
     it.innerHTML = `<b>${m.ua}</b><span class="tag" style="background:${catalog.categoryColors[m.category]}">${m.category}</span><br><small>${m.def || ""}</small>${m.task ? `<br><small><b>Завдання:</b> ${m.task}</small>` : ""}`;
     grpModes.appendChild(it);
   });
   body.appendChild(grpModes);
-  // схеми
   const grpS = document.createElement("div");
-  grpS.className = "ref-grp";
-  grpS.innerHTML = "<h3>18 ранніх дезадаптивних схем</h3>";
+  grpS.className = "ref-grp"; grpS.innerHTML = "<h3>18 ранніх дезадаптивних схем</h3>";
   catalog.schemas.forEach((s) => {
-    const it = document.createElement("div");
-    it.className = "ref-item";
+    const it = document.createElement("div"); it.className = "ref-item";
     it.dataset.text = (s.name + " " + s.short + " " + s.domain).toLowerCase();
     it.innerHTML = `<b>${s.name}</b><br><small>${s.short} · <i>${s.domain}</i></small>`;
     grpS.appendChild(it);
   });
   body.appendChild(grpS);
-  // потреби
   const grpN = document.createElement("div");
-  grpN.className = "ref-grp";
-  grpN.innerHTML = "<h3>Базові потреби</h3>";
+  grpN.className = "ref-grp"; grpN.innerHTML = "<h3>Базові потреби</h3>";
   catalog.basicNeeds.forEach((n) => {
-    const it = document.createElement("div");
-    it.className = "ref-item";
-    it.dataset.text = n.toLowerCase();
+    const it = document.createElement("div"); it.className = "ref-item"; it.dataset.text = n.toLowerCase();
     it.innerHTML = `<small>• ${n}</small>`;
     grpN.appendChild(it);
   });
@@ -237,18 +260,28 @@ function buildReference() {
 }
 $("#refSearch")?.addEventListener("input", (e) => {
   const q = e.target.value.trim().toLowerCase();
-  document.querySelectorAll("#refBody .ref-item").forEach((it) => {
-    it.style.display = !q || it.dataset.text.includes(q) ? "" : "none";
-  });
+  document.querySelectorAll("#refBody .ref-item").forEach((it) => { it.style.display = !q || it.dataset.text.includes(q) ? "" : "none"; });
 });
 
 // ---------- вкладки ----------
 function switchTab(name) {
-  document.querySelector(".workspace").dataset.tab = name; // для показу/приховування дій тільки для карти
+  document.querySelector(".workspace").dataset.tab = name;
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
   document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.dataset.panel === name));
 }
 document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => switchTab(t.dataset.tab)));
+
+// ---------- налаштування (ключі) ----------
+$("#settingsBtn").addEventListener("click", openSettings);
+$("#status").addEventListener("click", openSettings);
+$("#closeSettings").addEventListener("click", () => $("#settings").classList.add("hidden"));
+$("#saveKeys").addEventListener("click", () => {
+  localStorage.setItem("gk", $("#kGemini").value.trim());
+  localStorage.setItem("ak", $("#kAnthropic").value.trim());
+  updateKeyStatus();
+  $("#settings").classList.add("hidden");
+  setProgress("Ключі збережено у цьому браузері.", "");
+});
 
 // ---------- аудіо ----------
 function setAudio(f, label) { currentAudio = f; $("#fileName").textContent = label || (f?.name || "запис готовий"); $("#transcribe").disabled = !f; }
@@ -279,19 +312,13 @@ $("#rec").addEventListener("click", async () => {
 
 $("#transcribe").addEventListener("click", async () => {
   if (!currentAudio) return;
-  setProgress("Транскрибуємо аудіо (Gemini)… це може зайняти 1–3 хв", "busy");
+  setProgress("Транскрибуємо аудіо (Gemini)… може зайняти 1–3 хв", "busy");
   $("#transcribe").disabled = true;
   try {
-    const fd = new FormData();
-    fd.append("audio", currentAudio, currentAudio.name || "audio.webm");
-    const r = await fetch("/api/transcribe", { method: "POST", body: fd });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || "Помилка транскрипції");
-    $("#transcript").value = data.transcript || "";
+    $("#transcript").value = await transcribeAudio(currentAudio);
     setProgress("Готово. Перевір транскрипт і натисни «Аналізувати».", "");
-  } catch (e) {
-    setProgress("Помилка: " + e.message, "err");
-  } finally { $("#transcribe").disabled = false; }
+  } catch (e) { setProgress("Помилка: " + e.message, "err"); }
+  finally { $("#transcribe").disabled = false; }
 });
 
 $("#analyze").addEventListener("click", async () => {
@@ -300,24 +327,16 @@ $("#analyze").addEventListener("click", async () => {
   setProgress("Аналізуємо випадок (Claude)…", "busy");
   $("#analyze").disabled = true;
   try {
-    const r = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ transcript }) });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || "Помилка аналізу");
-    applyAnalysis(data.analysis);
+    applyAnalysis(await analyzeTranscript(transcript));
     setProgress("Готово ✓ Перевір і відредагуй карту й план перед експортом.", "");
-  } catch (e) {
-    setProgress("Помилка: " + e.message, "err");
-  } finally { $("#analyze").disabled = false; }
+  } catch (e) { setProgress("Помилка: " + e.message, "err"); }
+  finally { $("#analyze").disabled = false; }
 });
 
 // ---------- демо ----------
-$("#demo").addEventListener("click", async () => {
-  setProgress("Завантажую демо-приклад…", "busy");
-  try {
-    const a = await fetch("/api/sample").then((r) => r.json());
-    applyAnalysis(a);
-    setProgress("Демо-приклад завантажено. Спробуй редагування й експорт.", "");
-  } catch (e) { setProgress("Помилка демо: " + e.message, "err"); }
+$("#demo").addEventListener("click", () => {
+  applyAnalysis(JSON.parse(JSON.stringify(SAMPLE_ANALYSIS)));
+  setProgress("Демо-приклад завантажено. Спробуй редагування й експорт.", "");
 });
 
 // ---------- транскрипт із файлу (.txt) / посилання ----------
@@ -332,12 +351,12 @@ $("#urlLoad").addEventListener("click", async () => {
   if (!url) { setProgress("Встав посилання у поле зліва.", "err"); return; }
   setProgress("Завантажую з посилання…", "busy");
   try {
-    const r = await fetch("/api/fetch-url", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || "Помилка завантаження");
-    $("#transcript").value = (data.text || "").trim();
-    setProgress("Завантажено з посилання. Перевір текст і «Аналізувати».", "");
-  } catch (err) { setProgress("Помилка: " + err.message, "err"); }
+    const r = await fetch(url);
+    let text = await r.text();
+    if (/<[a-z]/i.test(text)) text = text.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<\/(p|div|h\d|li|br|tr)>/gi, "\n").replace(/<[^>]+>/g, " ").replace(/\s+\n/g, "\n").replace(/[ \t]{2,}/g, " ").trim();
+    $("#transcript").value = text.slice(0, 80000);
+    setProgress("Завантажено. Перевір текст і «Аналізувати».", "");
+  } catch (err) { setProgress("Не вдалося завантажити (можливо CORS). Скопіюй текст вручну.", "err"); }
 });
 
 // ---------- редактор вибраної частки ----------
@@ -364,21 +383,13 @@ $("#zoomFit").addEventListener("click", () => zoomFit(svg, state));
 // ---------- збереження/завантаження ----------
 $("#save").addEventListener("click", () => {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "concept-case.json";
-  a.click();
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "concept-case.json"; a.click();
 });
 $("#load").addEventListener("click", () => $("#loadFile").click());
 $("#loadFile").addEventListener("change", async (e) => {
   const f = e.target.files[0]; if (!f) return;
-  try {
-    const data = JSON.parse(await f.text());
-    Object.assign(state, data);
-    selectedId = null;
-    renderAll();
-    setProgress("Завантажено з файлу.", "");
-  } catch (err) { setProgress("Не вдалося прочитати файл: " + err.message, "err"); }
+  try { Object.assign(state, JSON.parse(await f.text())); selectedId = null; renderAll(); setProgress("Завантажено з файлу.", ""); }
+  catch (err) { setProgress("Не вдалося прочитати файл: " + err.message, "err"); }
 });
 
 init();
