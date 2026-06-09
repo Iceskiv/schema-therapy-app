@@ -16,6 +16,15 @@ button,input,textarea,select{font:inherit}
 .status.warn{background:#e9b949;color:#3a2c00}
 .status.ok{background:#2ea36a}
 
+.topbar-right{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+.authbox{display:flex;align-items:center}
+.btn-auth{border:1px solid rgba(255,255,255,.55);background:rgba(255,255,255,.14);color:#fff;padding:5px 12px;border-radius:20px;cursor:pointer;font-size:12.5px;white-space:nowrap;transition:.12s}
+.btn-auth:hover{background:rgba(255,255,255,.26)}
+.btn-auth.ghost{border-color:rgba(255,255,255,.32);background:transparent;padding:5px 10px}
+.userbox{display:flex;align-items:center;gap:8px;font-size:12.5px}
+.userbox.hidden,.btn-auth.hidden{display:none}
+#userEmail{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.95}
+
 .layout{display:grid;grid-template-columns:340px 1fr;gap:16px;padding:16px;align-items:start}
 .sidebar{display:flex;flex-direction:column;gap:14px;position:sticky;top:16px}
 

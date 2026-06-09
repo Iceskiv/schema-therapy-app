@@ -9,7 +9,16 @@
 <body>
   <header class="topbar">
     <div class="brand">🧩 Схема-терапія <span>· концептуалізація випадку</span></div>
-    <div id="status" class="status">…</div>
+    <div class="topbar-right">
+      <div id="status" class="status">…</div>
+      <div class="authbox">
+        <button id="loginBtn" class="btn-auth">Увійти через Google</button>
+        <span id="userBox" class="userbox hidden">
+          <span id="userEmail" title=""></span>
+          <button id="logoutBtn" class="btn-auth ghost">Вийти</button>
+        </span>
+      </div>
+    </div>
   </header>
 
   <main class="layout">
@@ -60,6 +69,7 @@
 
       <section class="card">
         <h3>Історія сесії</h3>
+        <p id="syncHint" class="hint" style="margin:0 0 8px">🔒 Зберігається в цьому браузері. <b>Увійди через Google</b> (вгорі) — і історія з ключами синхронізуються між пристроями.</p>
         <button id="snapSave" class="btn ghost block" style="margin-top:0">💾 Зберегти поточне в історію</button>
         <div id="historyList" class="history"></div>
       </section>

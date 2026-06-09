@@ -15,6 +15,8 @@ let currentAudio = null;
 let mediaRec = null;
 let recChunks = [];
 let selectedId = null;
+let cloud = null;       // модуль Firebase (вантажиться динамічно)
+let currentUser = null; // залогінений користувач або null
 
 const state = {
   catalog,
@@ -121,6 +123,7 @@ function init() {
   updateKeyStatus();
   const { gemini, anthropic } = getKeys();
   if (!gemini || !anthropic) setProgress("Натисни ⚙ і встав 2 ключі (або скористайся «Демо-приклад» без ключів).", "");
+  initCloud();
 }
 
 // ---------- маппінг аналізу у стан ----------
@@ -287,11 +290,13 @@ $("#settingsBtn").addEventListener("click", openSettings);
 $("#status").addEventListener("click", openSettings);
 $("#closeSettings").addEventListener("click", () => $("#settings").classList.add("hidden"));
 $("#saveKeys").addEventListener("click", () => {
-  localStorage.setItem("gk", $("#kGemini").value.trim());
-  localStorage.setItem("ak", $("#kAnthropic").value.trim());
+  const gk = $("#kGemini").value.trim(), ak = $("#kAnthropic").value.trim();
+  localStorage.setItem("gk", gk);
+  localStorage.setItem("ak", ak);
   updateKeyStatus();
   $("#settings").classList.add("hidden");
   setProgress("Ключі збережено у цьому браузері.", "");
+  if (currentUser && cloud) cloud.cloudSaveKeys(currentUser.uid, { gk, ak }).catch((e) => console.warn("cloud keys", e));
 });
 
 // ---------- аудіо ----------
@@ -468,8 +473,10 @@ function addSnapshot(label) {
   const arr = loadHistory();
   const ts = Date.now();
   const lbl = (label || state.patientSummary || ("Випадок " + (arr.length + 1))).trim().slice(0, 70);
-  arr.push({ id: "s" + ts + "_" + Math.floor(performance.now()), ts, label: lbl, snap: snapState() });
+  const item = { id: "s" + ts + "_" + Math.floor(performance.now()), ts, label: lbl, snap: snapState() };
+  arr.push(item);
   saveHistory(arr); renderHistory();
+  if (currentUser && cloud) cloud.cloudPutSnapshot(currentUser.uid, item).catch((e) => console.warn("cloud put", e));
 }
 function restoreSnapshot(id) {
   const item = loadHistory().find((x) => x.id === id); if (!item) return;
@@ -481,7 +488,10 @@ function restoreSnapshot(id) {
   selectedId = null; renderAll(); switchTab("map");
   toast("Відновлено з історії.", "info");
 }
-function delSnapshot(id) { saveHistory(loadHistory().filter((x) => x.id !== id)); renderHistory(); }
+function delSnapshot(id) {
+  saveHistory(loadHistory().filter((x) => x.id !== id)); renderHistory();
+  if (currentUser && cloud) cloud.cloudDeleteSnapshot(currentUser.uid, id).catch((e) => console.warn("cloud del", e));
+}
 function renderHistory() {
   const host = $("#historyList"); if (!host) return; host.innerHTML = "";
   for (const it of loadHistory().slice().reverse()) {
@@ -498,6 +508,78 @@ function renderHistory() {
 $("#snapSave").addEventListener("click", () => {
   if (!state.modes.length) { toast("Немає що зберігати — спершу аналіз або демо.", "error"); return; }
   addSnapshot(); toast("Збережено в історію ✓", "success");
+});
+
+// ---------- хмарна синхронізація (Firebase, опційно) ----------
+function renderAuthUI(user) {
+  const loginBtn = $("#loginBtn"), userBox = $("#userBox"), email = $("#userEmail"), hint = $("#syncHint");
+  if (!loginBtn) return;
+  if (user) {
+    loginBtn.classList.add("hidden");
+    userBox.classList.remove("hidden");
+    const who = user.email || user.displayName || "акаунт";
+    email.textContent = who; email.title = who;
+    if (hint) hint.innerHTML = "☁ Синхронізується з акаунтом <b>" + who + "</b> — історія й ключі доступні на всіх пристроях.";
+  } else {
+    loginBtn.classList.remove("hidden");
+    userBox.classList.add("hidden");
+    email.textContent = ""; email.title = "";
+    if (hint) hint.innerHTML = "🔒 Зберігається в цьому браузері. <b>Увійди через Google</b> (вгорі) — і історія з ключами синхронізуються між пристроями.";
+  }
+}
+
+async function handleAuth(user) {
+  currentUser = user || null;
+  renderAuthUI(currentUser);
+  if (!currentUser || !cloud) return;
+  try {
+    const { history: cloudHist, keys } = await cloud.cloudLoadAll(currentUser.uid);
+    // ключі: якщо локально нема — беремо з хмари; якщо є локальні — піднімаємо в хмару
+    const k = getKeys();
+    if (keys && (!k.gemini || !k.anthropic)) {
+      if (keys.gk && !k.gemini) localStorage.setItem("gk", keys.gk);
+      if (keys.ak && !k.anthropic) localStorage.setItem("ak", keys.ak);
+      updateKeyStatus();
+    } else if (k.gemini || k.anthropic) {
+      cloud.cloudSaveKeys(currentUser.uid, { gk: k.gemini, ak: k.anthropic }).catch(() => {});
+    }
+    // історія: об'єднуємо локальну й хмарну за id
+    const local = loadHistory();
+    const byId = new Map();
+    for (const it of [...cloudHist, ...local]) if (it && it.id) byId.set(it.id, it);
+    const merged = [...byId.values()].sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    saveHistory(merged); renderHistory();
+    // локальні записи, яких нема в хмарі — заливаємо
+    const cloudIds = new Set(cloudHist.map((x) => x.id));
+    for (const it of local) if (!cloudIds.has(it.id)) cloud.cloudPutSnapshot(currentUser.uid, it).catch(() => {});
+    toast("Синхронізовано з хмарою ✓ Історія: " + merged.length, "success");
+  } catch (e) {
+    toast("Хмара недоступна: " + (e.message || e), "error", 6000);
+  }
+}
+
+async function initCloud() {
+  try {
+    cloud = await import("./firebase-config.js");
+  } catch (e) {
+    console.warn("Firebase не завантажено (працюємо локально):", e);
+    return;
+  }
+  cloud.onAuth(handleAuth);
+}
+
+$("#loginBtn")?.addEventListener("click", async () => {
+  if (!cloud) { toast("Хмара ще вантажиться або немає інтернету. Онови сторінку.", "error", 6000); return; }
+  try { await cloud.signInGoogle(); }
+  catch (e) {
+    const code = String(e.code || e.message || "");
+    if (code.includes("popup-closed") || code.includes("cancelled") || code.includes("popup-blocked")) toast("Вхід скасовано (або браузер блокує спливне вікно).", "info");
+    else toast("Не вдалося увійти: " + code, "error", 7000);
+  }
+});
+$("#logoutBtn")?.addEventListener("click", async () => {
+  if (!cloud) return;
+  try { await cloud.signOutUser(); toast("Ви вийшли. Локальна історія лишилась на цьому пристрої.", "info"); } catch {}
 });
 
 init();
