@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: schema-therapy
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: CLAUDE_MODEL
+        value: claude-opus-4-8
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash

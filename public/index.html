@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Схема-терапія · Концептуалізація випадку</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🧩 Схема-терапія <span>· концептуалізація випадку</span></div>
+    <div id="status" class="status">…</div>
+  </header>
+
+  <main class="layout">
+    <!-- ЛІВА ПАНЕЛЬ: введення -->
+    <aside class="sidebar">
+      <section class="card">
+        <h3><span class="step">1</span> Аудіо випадку</h3>
+        <div id="drop" class="drop">
+          <input id="file" type="file" accept="audio/*,video/mp4,.m4a" hidden />
+          <p>Перетягни сюди файл <b>або</b></p>
+          <div class="row">
+            <button id="pick" class="btn">📁 Обрати файл</button>
+            <button id="rec" class="btn ghost">🎙 Запис з мікрофона</button>
+          </div>
+          <p id="fileName" class="muted"></p>
+        </div>
+        <button id="transcribe" class="btn primary block" disabled>Транскрибувати →</button>
+        <p class="hint">Порада: у Zoom увімкни локальний запис (аудіо), після надиктовки залий сюди <code>audio_only.m4a</code>. Будь-який формат теж підійде.</p>
+      </section>
+
+      <section class="card">
+        <h3><span class="step">2</span> Транскрипт / завдання</h3>
+        <div class="row" style="flex-wrap:wrap;margin-bottom:8px">
+          <button id="pickText" class="btn ghost" style="flex:1 1 120px">📄 Файл (.txt)</button>
+          <input id="textFile" type="file" accept=".txt,.md,.csv,.rtf,text/plain" hidden />
+          <input id="urlInput" class="inp" placeholder="або посилання на файл/документ" style="flex:2 1 150px" />
+          <button id="urlLoad" class="btn ghost" title="Завантажити з посилання">↳</button>
+        </div>
+        <textarea id="transcript" class="ta" rows="7" placeholder="Транскрипт або текст завдання. Можна вставити вручну, завантажити файл (.txt) чи посилання — і одразу «Аналізувати»."></textarea>
+        <button id="analyze" class="btn primary block">Аналізувати → карта + план</button>
+      </section>
+
+      <section class="card">
+        <div class="row spread">
+          <button id="demo" class="btn ghost">Демо-приклад</button>
+          <div class="row">
+            <button id="save" class="btn ghost" title="Зберегти у файл">💾</button>
+            <button id="load" class="btn ghost" title="Завантажити з файлу">📂</button>
+            <input id="loadFile" type="file" accept="application/json" hidden />
+          </div>
+        </div>
+        <p id="progress" class="progress"></p>
+      </section>
+    </aside>
+
+    <!-- ПРАВА ЧАСТИНА: робоча -->
+    <section class="workspace" data-tab="map">
+      <nav class="tabs">
+        <div class="tabset">
+          <button class="tab active" data-tab="map">Карта часток</button>
+          <button class="tab" data-tab="plan">План терапії</button>
+          <button class="tab" data-tab="ref">Довідник</button>
+        </div>
+        <div class="actions">
+          <div class="palette-wrap map-only">
+            <button id="addBtn" class="btn">➕ Додати частку</button>
+            <div id="palette" class="palette hidden"></div>
+          </div>
+          <div class="zoom map-only">
+            <button id="zoomOut" class="btn icon" title="Зменшити">−</button>
+            <button id="zoomFit" class="btn icon" title="Вмістити все">⤢</button>
+            <button id="zoomIn" class="btn icon" title="Збільшити">+</button>
+          </div>
+          <button id="png" class="btn map-only">🖼 PNG</button>
+          <button id="printBtn" class="btn primary">🖨 Друк / PDF</button>
+        </div>
+      </nav>
+
+      <!-- КАРТА -->
+      <div class="panel active" data-panel="map">
+        <div class="map-frame">
+          <svg id="map" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"></svg>
+        </div>
+        <div class="editors">
+          <div class="card editor">
+            <h4 id="selTitle">Вибрана частка</h4>
+            <div id="selEmpty" class="muted">Клікни на частку на карті, щоб редагувати її назву й маркери.</div>
+            <div id="selForm" class="hidden">
+              <label>Назва<input id="selName" class="inp" /></label>
+              <label>Маркери (по одному в рядку)<textarea id="selDesc" class="ta" rows="5"></textarea></label>
+              <div class="row">
+                <label class="grow">Сцена
+                  <select id="selScene" class="inp"><option value="internal">Внутрішня</option><option value="external">Зовнішня</option><option value="top">Зверху (ЗДЧ)</option><option value="bottom">Знизу (щаслива)</option></select>
+                </label>
+                <button id="selDelete" class="btn danger">Видалити</button>
+              </div>
+            </div>
+          </div>
+          <div class="card editor">
+            <h4>Проблеми</h4>
+            <textarea id="problems" class="ta" rows="9" placeholder="Один пункт у рядку"></textarea>
+          </div>
+          <div class="card editor">
+            <h4>Цілі терапії</h4>
+            <textarea id="goals" class="ta" rows="9" placeholder="Один пункт у рядку"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- ПЛАН -->
+      <div class="panel" data-panel="plan">
+        <div id="planEditor" class="plan-editor"></div>
+      </div>
+
+      <!-- ДОВІДНИК -->
+      <div class="panel" data-panel="ref">
+        <div class="toolbar">
+          <input id="refSearch" class="inp" placeholder="Пошук по схемах і частках…" />
+        </div>
+        <div id="refBody" class="ref-body"></div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
