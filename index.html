@@ -20,9 +20,13 @@
         <div id="drop" class="drop">
           <input id="file" type="file" accept="audio/*,video/mp4,.m4a" hidden />
           <p>Перетягни сюди файл <b>або</b></p>
-          <div class="row">
+          <div id="recControls" class="row">
             <button id="pick" class="btn">📁 Обрати файл</button>
             <button id="rec" class="btn ghost">🎙 Запис з мікрофона</button>
+          </div>
+          <div id="recBar" class="rec-bar hidden">
+            <span class="rec-dot"></span><span>Запис… <b id="recTime">00:00</b></span>
+            <button id="recStop" class="btn danger">⏹ Стоп</button>
           </div>
           <p id="fileName" class="muted"></p>
         </div>
@@ -51,7 +55,6 @@
             <input id="loadFile" type="file" accept="application/json" hidden />
           </div>
         </div>
-        <p id="progress" class="progress"></p>
       </section>
     </aside>
 
@@ -143,6 +146,18 @@
       </div>
     </div>
   </div>
+
+  <!-- Оверлей завантаження -->
+  <div id="overlay" class="overlay hidden">
+    <div class="overlay-card">
+      <div class="spinner"></div>
+      <div id="overlayTitle">Обробка…</div>
+      <div id="overlaySub" class="muted"></div>
+    </div>
+  </div>
+
+  <!-- Тости -->
+  <div id="toasts" class="toasts"></div>
 
   <script type="module" src="app.js"></script>
 </body>

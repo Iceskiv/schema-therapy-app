@@ -33,7 +33,17 @@ const state = {
 // ---------- утиліти ----------
 const linesToArr = (s) => String(s || "").split("\n").map((x) => x.trim()).filter(Boolean);
 const arrToLines = (a) => (a || []).join("\n");
-function setProgress(msg, kind = "") { const p = $("#progress"); p.textContent = msg || ""; p.className = "progress " + kind; }
+function toast(msg, kind = "info", ms = 4200) {
+  if (!msg) return;
+  const wrap = $("#toasts"); if (!wrap) return;
+  const t = document.createElement("div"); t.className = "toast " + kind; t.textContent = msg;
+  wrap.appendChild(t); requestAnimationFrame(() => t.classList.add("show"));
+  setTimeout(() => { t.classList.remove("show"); setTimeout(() => t.remove(), 300); }, ms);
+}
+function setProgress(msg, kind = "") { toast(msg, kind === "err" ? "error" : "info"); }
+function showOverlay(title, sub) { $("#overlayTitle").textContent = title || ""; $("#overlaySub").textContent = sub || ""; $("#overlay").classList.remove("hidden"); }
+function hideOverlay() { $("#overlay").classList.add("hidden"); }
+let recTimer = null, recStart = 0;
 function uniqueId(base) { let id = base, i = 2; while (state.modes.some((m) => m.id === id)) id = base + "__" + i++; return id; }
 function defById(id) { return (catalog.modes || []).find((m) => m.id === id) || {}; }
 function mimeFromName(name) {
@@ -292,7 +302,18 @@ const drop = $("#drop");
 ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("drag"); }));
 drop.addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f) setAudio(f); });
 
-$("#rec").addEventListener("click", async () => {
+function startRecUI() {
+  $("#recBar").classList.remove("hidden");
+  $("#recControls").classList.add("hidden");
+  recStart = Date.now();
+  $("#recTime").textContent = "00:00";
+  recTimer = setInterval(() => {
+    const s = Math.floor((Date.now() - recStart) / 1000);
+    $("#recTime").textContent = String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+  }, 500);
+}
+function stopRecUI() { clearInterval(recTimer); recTimer = null; $("#recBar").classList.add("hidden"); $("#recControls").classList.remove("hidden"); }
+async function startRecording() {
   if (mediaRec && mediaRec.state === "recording") { mediaRec.stop(); return; }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -301,36 +322,37 @@ $("#rec").addEventListener("click", async () => {
     mediaRec.ondataavailable = (e) => e.data.size && recChunks.push(e.data);
     mediaRec.onstop = () => {
       stream.getTracks().forEach((t) => t.stop());
+      const dur = $("#recTime").textContent;
+      stopRecUI();
       const blob = new Blob(recChunks, { type: recChunks[0]?.type || "audio/webm" });
-      setAudio(blob, `🎙 запис (${Math.round(blob.size / 1024)} КБ)`);
-      $("#rec").textContent = "🎙 Запис з мікрофона";
+      setAudio(blob, `🎙 запис ${dur}`);
     };
     mediaRec.start();
-    $("#rec").textContent = "⏹ Зупинити запис";
-  } catch (e) { setProgress("Немає доступу до мікрофона: " + e.message, "err"); }
-});
+    startRecUI();
+  } catch (e) { toast("Немає доступу до мікрофона: " + e.message, "error"); }
+}
+$("#rec").addEventListener("click", startRecording);
+$("#recStop").addEventListener("click", () => { if (mediaRec && mediaRec.state === "recording") mediaRec.stop(); });
 
 $("#transcribe").addEventListener("click", async () => {
   if (!currentAudio) return;
-  setProgress("Транскрибуємо аудіо (Gemini)… може зайняти 1–3 хв", "busy");
-  $("#transcribe").disabled = true;
+  showOverlay("Транскрибую аудіо…", "Gemini розшифровує запис — це може зайняти 1–3 хв");
   try {
     $("#transcript").value = await transcribeAudio(currentAudio);
-    setProgress("Готово. Перевір транскрипт і натисни «Аналізувати».", "");
-  } catch (e) { setProgress("Помилка: " + e.message, "err"); }
-  finally { $("#transcribe").disabled = false; }
+    toast("Транскрипт готовий ✓ Тепер «Аналізувати».", "success");
+  } catch (e) { toast("Помилка транскрипції: " + e.message, "error", 7000); }
+  finally { hideOverlay(); }
 });
 
 $("#analyze").addEventListener("click", async () => {
   const transcript = $("#transcript").value.trim();
-  if (!transcript) { setProgress("Спершу додай транскрипт (або встав текст).", "err"); return; }
-  setProgress("Аналізуємо випадок (Claude)…", "busy");
-  $("#analyze").disabled = true;
+  if (!transcript) { toast("Спершу додай транскрипт (або встав текст).", "error"); return; }
+  showOverlay("Аналізую випадок…", "Claude будує карту часток і план терапії — до хвилини");
   try {
     applyAnalysis(await analyzeTranscript(transcript));
-    setProgress("Готово ✓ Перевір і відредагуй карту й план перед експортом.", "");
-  } catch (e) { setProgress("Помилка: " + e.message, "err"); }
-  finally { $("#analyze").disabled = false; }
+    toast("Готово ✓ Карту й план побудовано.", "success");
+  } catch (e) { toast("Помилка аналізу: " + e.message, "error", 7000); }
+  finally { hideOverlay(); }
 });
 
 // ---------- демо ----------

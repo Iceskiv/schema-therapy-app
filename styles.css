@@ -106,4 +106,27 @@ label .inp,label .ta{margin-top:3px}
 .modal-box h3{margin:0 0 8px;font-size:16px}
 .modal-box label{margin:14px 0 0}
 
+/* оверлей завантаження */
+.overlay{position:fixed;inset:0;background:rgba(20,30,50,.5);display:flex;align-items:center;justify-content:center;z-index:60}
+.overlay.hidden{display:none}
+.overlay-card{background:#fff;border-radius:16px;padding:28px 36px;text-align:center;box-shadow:0 20px 60px rgba(20,40,70,.35);max-width:90vw}
+#overlayTitle{font-weight:700;font-size:16px;margin-top:16px;color:var(--ink)}
+#overlaySub{font-size:12.5px;margin-top:5px}
+.spinner{width:46px;height:46px;border:4px solid #d8e3ef;border-top-color:var(--brand);border-radius:50%;margin:0 auto;animation:spin .9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* тости */
+.toasts{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:70;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none;width:max-content;max-width:92vw}
+.toast{pointer-events:auto;background:#1f2733;color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;line-height:1.35;box-shadow:0 8px 24px rgba(0,0,0,.2);opacity:0;transform:translateY(-8px);transition:.25s;text-align:center}
+.toast.show{opacity:1;transform:translateY(0)}
+.toast.success{background:#2e7d52}
+.toast.error{background:#9c2b2b}
+.toast.info{background:#2e5e8c}
+
+/* індикатор запису */
+.rec-bar{display:flex;align-items:center;gap:10px;justify-content:center;background:#fdecec;border:1px solid #f3c4c4;border-radius:10px;padding:8px 12px;font-size:13px}
+.rec-bar.hidden{display:none}
+.rec-dot{width:12px;height:12px;border-radius:50%;background:#d33;animation:pulse 1s ease-in-out infinite;flex:none}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.75)}}
+
 @media (max-width:1100px){ .layout{grid-template-columns:1fr} .sidebar{position:static} .editors{grid-template-columns:1fr} }
