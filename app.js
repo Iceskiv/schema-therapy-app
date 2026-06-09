@@ -180,6 +180,7 @@ function renderSelected() {
   $("#selName").value = m.ua;
   $("#selDesc").value = arrToLines(m.descriptors);
   $("#selScene").value = m.scene;
+  $("#selSize").value = m.sizeMul || 1;
 }
 
 // ---------- палітра ----------
@@ -350,7 +351,8 @@ $("#analyze").addEventListener("click", async () => {
   showOverlay("Аналізую випадок…", "Claude будує карту часток і план терапії — до хвилини");
   try {
     applyAnalysis(await analyzeTranscript(transcript));
-    toast("Готово ✓ Карту й план побудовано.", "success");
+    addSnapshot();
+    toast("Готово ✓ Карту й план побудовано (збережено в історію).", "success");
   } catch (e) { toast("Помилка аналізу: " + e.message, "error", 7000); }
   finally { hideOverlay(); }
 });
@@ -385,6 +387,7 @@ $("#urlLoad").addEventListener("click", async () => {
 $("#selName").addEventListener("input", (e) => { const m = state.modes.find((x) => x.id === selectedId); if (m) { m.ua = e.target.value; renderMap(svg, state, { onSelect: selectNode }); $("#selTitle").textContent = m.ua; } });
 $("#selDesc").addEventListener("input", (e) => { const m = state.modes.find((x) => x.id === selectedId); if (m) { m.descriptors = linesToArr(e.target.value); renderMap(svg, state, { onSelect: selectNode }); } });
 $("#selScene").addEventListener("change", (e) => { const m = state.modes.find((x) => x.id === selectedId); if (m) { m.scene = e.target.value; m.x = null; m.y = null; renderMap(svg, state, { onSelect: selectNode }); } });
+$("#selSize").addEventListener("input", (e) => { const m = state.modes.find((x) => x.id === selectedId); if (m) { m.sizeMul = +e.target.value; renderMap(svg, state, { onSelect: selectNode }); } });
 $("#selDelete").addEventListener("click", () => { state.modes = state.modes.filter((x) => x.id !== selectedId); selectedId = null; renderAll(); });
 
 // ---------- проблеми / цілі ----------
@@ -414,4 +417,54 @@ $("#loadFile").addEventListener("change", async (e) => {
   catch (err) { setProgress("Не вдалося прочитати файл: " + err.message, "err"); }
 });
 
+// ---------- історія сесії (карти + плани, у localStorage) ----------
+const HKEY = "stHistory_v1";
+function loadHistory() { try { return JSON.parse(localStorage.getItem(HKEY) || "[]"); } catch { return []; } }
+function saveHistory(arr) { localStorage.setItem(HKEY, JSON.stringify(arr.slice(-30))); }
+function snapState() {
+  return {
+    patientSummary: state.patientSummary,
+    problems: [...state.problems], goals: [...state.goals],
+    modes: JSON.parse(JSON.stringify(state.modes)),
+    plan: JSON.parse(JSON.stringify(state.plan)),
+    planDoc: state.planDoc, transcript: $("#transcript").value,
+  };
+}
+function addSnapshot(label) {
+  const arr = loadHistory();
+  const ts = Date.now();
+  const lbl = (label || state.patientSummary || ("Випадок " + (arr.length + 1))).trim().slice(0, 70);
+  arr.push({ id: "s" + ts + "_" + Math.floor(performance.now()), ts, label: lbl, snap: snapState() });
+  saveHistory(arr); renderHistory();
+}
+function restoreSnapshot(id) {
+  const item = loadHistory().find((x) => x.id === id); if (!item) return;
+  const s = item.snap;
+  state.patientSummary = s.patientSummary || "";
+  state.problems = s.problems || []; state.goals = s.goals || [];
+  state.modes = s.modes || []; state.plan = s.plan || state.plan; state.planDoc = s.planDoc || "";
+  $("#transcript").value = s.transcript || "";
+  selectedId = null; renderAll(); switchTab("map");
+  toast("Відновлено з історії.", "info");
+}
+function delSnapshot(id) { saveHistory(loadHistory().filter((x) => x.id !== id)); renderHistory(); }
+function renderHistory() {
+  const host = $("#historyList"); if (!host) return; host.innerHTML = "";
+  for (const it of loadHistory().slice().reverse()) {
+    const d = new Date(it.ts);
+    const hh = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+    const row = document.createElement("div"); row.className = "hist-item";
+    const lab = document.createElement("span"); lab.className = "hist-label"; lab.title = it.label; lab.textContent = it.label + " · " + hh;
+    lab.addEventListener("click", () => restoreSnapshot(it.id));
+    const del = document.createElement("button"); del.className = "hist-del"; del.textContent = "×"; del.title = "Видалити";
+    del.addEventListener("click", () => delSnapshot(it.id));
+    row.append(lab, del); host.appendChild(row);
+  }
+}
+$("#snapSave").addEventListener("click", () => {
+  if (!state.modes.length) { toast("Немає що зберігати — спершу аналіз або демо.", "error"); return; }
+  addSnapshot(); toast("Збережено в історію ✓", "success");
+});
+
 init();
+renderHistory();

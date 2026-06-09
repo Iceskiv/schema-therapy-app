@@ -42,12 +42,14 @@ function tspans(lines, x, startY, lineH, attrs = {}) {
 
 function radiusFor(m) {
   const b = m.baseId || m.id;
-  if (m.scene === "top" || b === "healthy_adult") return 58;
-  if (m.scene === "bottom" || b === "happy_child") return 50;
-  if (b === "vulnerable_child") return 128;
-  if (m.category === "parent") return 108;
-  if (m.category === "child") return 92;
-  return 100;
+  let base;
+  if (m.scene === "top" || b === "healthy_adult") base = 58;
+  else if (m.scene === "bottom" || b === "happy_child") base = 50;
+  else if (b === "vulnerable_child") base = 128;
+  else if (m.category === "parent") base = 108;
+  else if (m.category === "child") base = 92;
+  else base = 100;
+  return base * (m.sizeMul || 1); // ручний множник розміру частки
 }
 function nodeContent(m) {
   const rx = radiusFor(m);
