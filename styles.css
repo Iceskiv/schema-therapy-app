@@ -26,7 +26,7 @@ button,input,textarea,select{font:inherit}
 #userEmail{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.95}
 
 .layout{display:grid;grid-template-columns:340px 1fr;gap:16px;padding:16px;align-items:start}
-.sidebar{display:flex;flex-direction:column;gap:14px;position:sticky;top:16px}
+.sidebar{display:flex;flex-direction:column;gap:14px;position:sticky;top:16px;min-width:0}
 
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;box-shadow:var(--shadow)}
 .card h3{margin:0 0 10px;font-size:14px;display:flex;align-items:center;gap:8px}
@@ -65,7 +65,7 @@ label .inp,label .ta{margin-top:3px}
 .progress.err{color:var(--red)}
 .progress.busy{color:var(--brand)}
 
-.workspace{background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);min-height:80vh;overflow:visible}
+.workspace{background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);min-height:80vh;overflow:visible;min-width:0}
 .tabs{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;border-bottom:1px solid var(--line);background:#fbfdff;padding:0 8px;border-radius:12px 12px 0 0;box-shadow:0 3px 12px rgba(20,40,70,.07)}
 .tabset{display:flex;gap:2px}
 .actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0}
@@ -152,3 +152,26 @@ label .inp,label .ta{margin-top:3px}
 .hist-del:hover{color:var(--red)}
 
 @media (max-width:1100px){ .layout{grid-template-columns:1fr} .sidebar{position:static} .editors{grid-template-columns:1fr} }
+
+/* мобільні екрани: компактна шапка + захист від горизонтального зсуву */
+@media (max-width:640px){
+  .topbar{flex-wrap:wrap;gap:4px 10px;padding:8px 12px}
+  .brand{flex:1 1 100%;font-size:14px;line-height:1.2}
+  .brand span{font-size:11.5px}
+  .topbar-right{flex:1 1 100%;justify-content:flex-start;gap:6px 8px}
+  .status{font-size:11px;padding:3px 8px}
+  .btn-auth{padding:4px 9px;font-size:11.5px}
+  .btn-auth.ghost{padding:4px 8px}
+  #userEmail{max-width:42vw}
+
+  .layout{padding:12px;gap:12px}
+  .tabs{padding:0 6px}
+  .tab{padding:11px 9px;font-size:12.5px}
+  .actions{gap:6px;padding:6px 0}
+  .panel{padding:10px}
+  .btn{padding:7px 9px}
+  .btn.icon{min-width:32px;padding:6px 9px}
+  .map-frame{height:52vh}
+  .drop .row .btn{flex:1 1 44%}
+  .palette{width:90vw}
+}
