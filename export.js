@@ -47,7 +47,7 @@ export async function printSheets(svg, planHTML, title = "Концептуалі
     .sheet { page-break-after: always; }
     .sheet:last-child { page-break-after: auto; }
     h1 { font-size: 18px; margin: 0 0 10px; }
-    .map img { width: 100%; height: auto; border:1px solid #ddd; }
+    .map img { width: 100%; height: auto; display:block; }
     .plan h2 { font-size: 15px; margin: 16px 0 4px; color:#1f4e79; border-bottom:1px solid #ccc; padding-bottom:3px; }
     .plan p { margin: 4px 0; font-size: 12.5px; line-height:1.45; }
     .plan .lbl { font-weight:700; }
@@ -55,7 +55,7 @@ export async function printSheets(svg, planHTML, title = "Концептуалі
     .plan li { font-size: 12px; margin: 2px 0; }
     .muted { color:#666; font-size: 11px; }
   </style></head><body>
-    <div class="sheet map"><h1>Карта часток · ${title}</h1><img src="${png}"></div>
+    <div class="sheet map"><img src="${png}"></div>
     <div class="sheet plan">${planHTML}</div>
   </body></html>`);
   w.document.close();

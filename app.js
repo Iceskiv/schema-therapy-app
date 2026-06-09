@@ -335,6 +335,40 @@ async function startRecording() {
 $("#rec").addEventListener("click", startRecording);
 $("#recStop").addEventListener("click", () => { if (mediaRec && mediaRec.state === "recording") mediaRec.stop(); });
 
+// Запис звуку, що грає на цьому ПК (Zoom / YouTube) — через захоплення вкладки/екрана
+async function startSystemAudio() {
+  if (mediaRec && mediaRec.state === "recording") { mediaRec.stop(); return; }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) { toast("Браузер не підтримує захоплення звуку екрана.", "error"); return; }
+  try {
+    const display = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    const aTracks = display.getAudioTracks();
+    if (!aTracks.length) {
+      display.getTracks().forEach((t) => t.stop());
+      toast("Аудіо не захоплено. У вікні вибору обери вкладку або «Весь екран» і постав галочку «Поділитися аудіо».", "error", 9000);
+      return;
+    }
+    const aStream = new MediaStream(aTracks);
+    recChunks = [];
+    mediaRec = new MediaRecorder(aStream);
+    mediaRec.ondataavailable = (e) => e.data.size && recChunks.push(e.data);
+    mediaRec.onstop = () => {
+      display.getTracks().forEach((t) => t.stop());
+      const dur = $("#recTime").textContent;
+      stopRecUI();
+      const blob = new Blob(recChunks, { type: recChunks[0]?.type || "audio/webm" });
+      setAudio(blob, `🔊 звук з ПК ${dur}`);
+    };
+    aTracks[0].addEventListener("ended", () => { if (mediaRec && mediaRec.state === "recording") mediaRec.stop(); });
+    mediaRec.start();
+    startRecUI();
+    toast("Запис звуку з ПК пішов. Натисни «⏹ Стоп», коли закінчиш.", "info");
+  } catch (e) {
+    if (e.name === "NotAllowedError") toast("Захоплення скасовано.", "info");
+    else toast("Не вдалося захопити звук з ПК: " + e.message, "error", 7000);
+  }
+}
+$("#recSystem").addEventListener("click", startSystemAudio);
+
 $("#transcribe").addEventListener("click", async () => {
   if (!currentAudio) return;
   showOverlay("Транскрибую аудіо…", "Gemini розшифровує запис — це може зайняти 1–3 хв");
