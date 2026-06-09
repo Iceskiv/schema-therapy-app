@@ -152,23 +152,57 @@ function layout(state) {
   placeColumn(external, EXTERNAL_X, EX_TOP, EX_BOTTOM, scale);
 }
 
-// ---- зум / пан ----
+// ---- зум / пан (плавне згладжування через requestAnimationFrame) ----
 const clampZ = (z) => Math.max(ZMIN, Math.min(ZMAX, z));
-export function applyView(svg, state) {
-  const vp = svg.querySelector(".viewport");
-  if (!vp) return;
-  const v = state._view || (state._view = { z: 1, x: 0, y: 0 });
-  vp.setAttribute("transform", `translate(${v.x} ${v.y}) scale(${v.z})`);
+const cssEsc = (s) => String(s).replace(/["\\]/g, "\\$&");
+
+function ensureView(state) {
+  if (!state._view) state._view = { z: 1, x: 0, y: 0 };           // ціль
+  if (!state._disp) state._disp = { z: state._view.z, x: state._view.x, y: state._view.y }; // показане
+  return state._view;
 }
+function setTransform(svg, d) {
+  const vp = svg.querySelector(".viewport");
+  if (vp) vp.setAttribute("transform", `translate(${d.x.toFixed(2)} ${d.y.toFixed(2)}) scale(${d.z.toFixed(4)})`);
+}
+// миттєво, без анімації — для перемальовування та експорту
+export function applyView(svg, state) {
+  ensureView(state);
+  state._disp = { z: state._view.z, x: state._view.x, y: state._view.y };
+  setTransform(svg, state._disp);
+}
+// цикл згладжування: показане (_disp) плавно наздоганяє ціль (_view); частку оновлюємо раз на кадр
+function animate(svg, state) {
+  if (svg._raf) return;
+  const vp0 = svg.querySelector(".viewport"); if (vp0) vp0.style.willChange = "transform";
+  const step = () => {
+    ensureView(state);
+    const t = state._view, d = state._disp, k = 0.25;
+    d.x += (t.x - d.x) * k; d.y += (t.y - d.y) * k; d.z += (t.z - d.z) * k;
+    if (Math.abs(t.x - d.x) < 0.15) d.x = t.x;
+    if (Math.abs(t.y - d.y) < 0.15) d.y = t.y;
+    if (Math.abs(t.z - d.z) < 0.0012) d.z = t.z;
+    setTransform(svg, d);
+    for (const m of state.modes) {
+      if (m._tx == null) continue; // частка, що зараз перетягується
+      const g = svg.querySelector(`.st-node[data-id="${cssEsc(m.id)}"]`);
+      if (g) g.setAttribute("transform", `translate(${m._tx.toFixed(2)},${m._ty.toFixed(2)})`);
+    }
+    if (d.x !== t.x || d.y !== t.y || d.z !== t.z) { svg._raf = requestAnimationFrame(step); }
+    else { svg._raf = null; const vp = svg.querySelector(".viewport"); if (vp) vp.style.willChange = ""; }
+  };
+  svg._raf = requestAnimationFrame(step);
+}
+
 export function zoomAround(state, px, py, factor) {
-  const v = state._view || (state._view = { z: 1, x: 0, y: 0 });
+  const v = ensureView(state);
   const z2 = clampZ(v.z * factor);
   v.x = px - (z2 / v.z) * (px - v.x);
   v.y = py - (z2 / v.z) * (py - v.y);
   v.z = z2;
 }
-export function zoomBy(svg, state, factor) { zoomAround(state, MAP_W / 2, MAP_H / 2, factor); applyView(svg, state); }
-export function zoomFit(svg, state) { state._view = { z: 1, x: 0, y: 0 }; applyView(svg, state); }
+export function zoomBy(svg, state, factor) { zoomAround(state, MAP_W / 2, MAP_H / 2, factor); animate(svg, state); }
+export function zoomFit(svg, state) { ensureView(state); state._view = { z: 1, x: 0, y: 0 }; animate(svg, state); }
 
 export function renderMap(svg, state, opts = {}) {
   if (!state._view) state._view = { z: 1, x: 0, y: 0 };
@@ -193,11 +227,13 @@ export function renderMap(svg, state, opts = {}) {
 }
 
 function enableInteract(svg, state) {
-  const vp = svg.querySelector(".viewport");
-  let node = null, nstart = null;     // перетягування частки
-  let pan = null;                     // панорамування
+  if (svg._interactBound) return;   // слухачі — лише раз (renderMap викликається часто; інакше дублі → рвані рухи)
+  svg._interactBound = true;
+
+  let node = null, nstart = null;   // перетягування частки
+  let pan = null;                   // панорамування
   const pt = svg.createSVGPoint();
-  const inVp = (e) => { pt.x = e.clientX; pt.y = e.clientY; return pt.matrixTransform(vp.getScreenCTM().inverse()); };
+  const inVp = (e) => { const vp = svg.querySelector(".viewport"); pt.x = e.clientX; pt.y = e.clientY; return pt.matrixTransform(vp.getScreenCTM().inverse()); };
   const inBox = (e) => { pt.x = e.clientX; pt.y = e.clientY; return pt.matrixTransform(svg.getScreenCTM().inverse()); };
 
   svg.addEventListener("pointerdown", (e) => {
@@ -205,35 +241,47 @@ function enableInteract(svg, state) {
     if (g) {
       node = g; delete g.dataset.dragged;
       const m = state.modes.find((x) => x.id === g.getAttribute("data-id"));
-      const p = inVp(e); nstart = { px: p.x, py: p.y, m };
-      g.setPointerCapture(e.pointerId); g.style.cursor = "grabbing";
+      if (!m) { node = null; return; }
+      const p = inVp(e);
+      nstart = { px: p.x, py: p.y, m };
+      m._tx = m.x; m._ty = m.y;                 // ціль руху частки
+      g.setPointerCapture(e.pointerId); g.style.cursor = "grabbing"; g.style.willChange = "transform";
     } else {
-      const p = inBox(e); pan = { px: p.x, py: p.y, vx: state._view.x, vy: state._view.y };
+      const p = inBox(e);
+      pan = { px: p.x, py: p.y, vx: state._view.x, vy: state._view.y };
       svg.style.cursor = "grabbing"; svg.setPointerCapture(e.pointerId);
     }
   });
   svg.addEventListener("pointermove", (e) => {
     if (node && nstart) {
-      const p = inVp(e);
-      const nx = nstart.m.x + (p.x - nstart.px), ny = nstart.m.y + (p.y - nstart.py);
-      if (Math.abs(p.x - nstart.px) + Math.abs(p.y - nstart.py) > 2) node.dataset.dragged = "1";
-      nstart.m.x = nx; nstart.m.y = ny; nstart.px = p.x; nstart.py = p.y;
-      node.setAttribute("transform", `translate(${nx},${ny})`);
+      const p = inVp(e), m = nstart.m;
+      m._tx += (p.x - nstart.px); m._ty += (p.y - nstart.py);
+      nstart.px = p.x; nstart.py = p.y;
+      if (Math.abs(m._tx - m.x) + Math.abs(m._ty - m.y) > 2) node.dataset.dragged = "1";
+      animate(svg, state);                       // застосуємо позицію раз на кадр
     } else if (pan) {
       const p = inBox(e);
       state._view.x = pan.vx + (p.x - pan.px);
       state._view.y = pan.vy + (p.y - pan.py);
-      applyView(svg, state);
+      animate(svg, state);
     }
   });
-  const end = () => { if (node) node.style.cursor = "grab"; svg.style.cursor = "grab"; node = null; nstart = null; pan = null; };
+  const end = () => {
+    if (node && nstart) {
+      const m = nstart.m;
+      m.x = m._tx; m.y = m._ty;
+      node.setAttribute("transform", `translate(${m.x},${m.y})`);
+      delete m._tx; delete m._ty; node.style.cursor = "grab"; node.style.willChange = "";
+    }
+    svg.style.cursor = "grab"; node = null; nstart = null; pan = null;
+  };
   svg.addEventListener("pointerup", end);
   svg.addEventListener("pointercancel", end);
   svg.addEventListener("wheel", (e) => {
     e.preventDefault();
     const p = inBox(e);
-    zoomAround(state, p.x, p.y, e.deltaY < 0 ? 1.12 : 1 / 1.12);
-    applyView(svg, state);
+    zoomAround(state, p.x, p.y, e.deltaY < 0 ? 1.15 : 1 / 1.15);
+    animate(svg, state);
   }, { passive: false });
   svg.style.cursor = "grab";
 }
