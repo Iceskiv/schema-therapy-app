@@ -25,8 +25,10 @@ const app = express();
 app.use(express.json({ limit: "8mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
+const uploadDir = path.join(os.tmpdir(), "schema-uploads");
+fs.mkdirSync(uploadDir, { recursive: true });
 const upload = multer({
-  dest: path.join(os.tmpdir(), "schema-uploads"),
+  dest: uploadDir,
   limits: { fileSize: 400 * 1024 * 1024 },
 });
 
